@@ -1,4 +1,4 @@
-# Dependencies and tool configurations
+.agents
 skills-lock.json
-.scratch/
-*.log
+SPEC.md
+CONTEXT.md
