@@ -42,3 +42,6 @@ The calculated evaluation of a workday based on Punch timestamps compared agains
 
 ### Discrepancy Evidence Record
 The monthly visual breakdown showing actual timestamps, total hours, and status badges. Serves as personal proof to challenge inaccurate employer payroll or attendance reports.
+
+### AttendanceTracker
+The deep domain module encapsulating the Workday lifecycle, punch invariants, shift rule evaluations, and discrepancy calculations behind a minimal 3-method interface (`today`, `punch`, `monthlyReport`).

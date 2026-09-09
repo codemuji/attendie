@@ -114,27 +114,5 @@ function calculateDayStatus(int $workedSeconds, array $settings): string {
     return 'INCOMPLETE';
 }
 
-/**
- * Helper: Evaluate arrival status and late minutes based on grace window
- */
-function evaluateArrival(DateTime $punchTime, string $logDate, array $settings): array {
-    $shiftStart = $settings['shift_start_time'] ?? '10:00:00';
-    $graceMinutes = (int)($settings['grace_period_minutes'] ?? 15);
-
-    $graceCutoff = new DateTime($logDate . ' ' . $shiftStart);
-    $graceCutoff->modify("+{$graceMinutes} minutes");
-
-    $isLate = $punchTime > $graceCutoff;
-    $lateMinutes = 0;
-
-    if ($isLate) {
-        $diffSeconds = $punchTime->getTimestamp() - $graceCutoff->getTimestamp();
-        $lateMinutes = (int)ceil($diffSeconds / 60);
-    }
-
-    return [
-        'status_in' => $isLate ? 'LATE' : 'ON_TIME',
-        'late_minutes' => $lateMinutes,
-        'is_late' => $isLate
-    ];
-}
+require_once __DIR__ . '/../src/AttendanceTracker.php';
+$attendanceTracker = new AttendanceTracker($pdo);

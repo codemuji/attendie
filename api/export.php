@@ -2,28 +2,7 @@
 require_once __DIR__ . '/../config/db.php';
 
 $monthParam = $_GET['month'] ?? date('Y-m');
-if (!preg_match('/^\d{4}-\d{2}$/', $monthParam)) {
-    $monthParam = date('Y-m');
-}
-
-$startDate = $monthParam . '-01';
-$daysInMonth = (int)date('t', strtotime($startDate));
-$endDate = $monthParam . '-' . str_pad($daysInMonth, 2, '0', STR_PAD_LEFT);
-$todayDate = date('Y-m-d');
-
-// Fetch logs
-$stmt = $pdo->prepare("
-    SELECT * FROM `attendance_logs` 
-    WHERE `log_date` BETWEEN ? AND ? 
-    ORDER BY `log_date` ASC
-");
-$stmt->execute([$startDate, $endDate]);
-$logs = $stmt->fetchAll();
-
-$logsByDate = [];
-foreach ($logs as $l) {
-    $logsByDate[$l['log_date']] = $l;
-}
+$report = $attendanceTracker->monthlyReport($monthParam);
 
 $filename = "attendie_report_{$monthParam}.csv";
 
@@ -37,7 +16,7 @@ fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
 // Header title
 fputcsv($output, ["ATTENDIE - PERSONAL ATTENDANCE & DISCREPANCY AUDIT REPORT"]);
-fputcsv($output, ["Month: " . date('F Y', strtotime($startDate)), "Generated At: " . date('Y-m-d H:i:s')]);
+fputcsv($output, ["Month: " . $report['month_name'], "Generated At: " . date('Y-m-d H:i:s')]);
 fputcsv($output, ["Shift Policy: Start 10:00 AM (15m Grace) | End 06:30 PM | Full Day: 8.0h | Half Day: 4.0h"]);
 fputcsv($output, []); // blank line
 
@@ -54,55 +33,35 @@ fputcsv($output, [
     'Discrepancy Note'
 ]);
 
-for ($d = 1; $d <= $daysInMonth; $d++) {
-    $dateStr = $monthParam . '-' . str_pad($d, 2, '0', STR_PAD_LEFT);
-    $timestamp = strtotime($dateStr);
-    $dayOfWeek = date('D', $timestamp);
-    $dayName = date('l', $timestamp);
-    $isSunday = ($dayOfWeek === 'Sun');
-    $isPast = ($dateStr < $todayDate);
-    $isToday = ($dateStr === $todayDate);
+// Sort chronological (oldest to newest for export)
+$days = array_reverse($report['days']);
 
-    $log = $logsByDate[$dateStr] ?? null;
-
-    if ($isSunday) {
-        fputcsv($output, [$dateStr, $dayName, '-', '-', '-', 'OFF', 'SCHEDULED OFF', 0, 'Official Weekend Day Off']);
+foreach ($days as $day) {
+    if ($day['is_sunday']) {
+        fputcsv($output, [$day['date'], $day['day_name'], '-', '-', '-', 'OFF', 'SCHEDULED OFF', 0, 'Official Weekend Day Off']);
         continue;
     }
 
-    if ($log) {
-        $inTime = !empty($log['check_in']) ? date('h:i A', strtotime($log['check_in'])) : '-';
-        $outTime = !empty($log['check_out']) ? date('h:i A', strtotime($log['check_out'])) : ($isToday ? 'In Progress' : '-');
-        
-        $seconds = (int)$log['worked_seconds'];
-        if ($isToday && empty($log['check_out']) && !empty($log['check_in'])) {
-            $seconds = max(0, time() - strtotime($log['check_in']));
-        }
-        $durationFormatted = formatWorkedSeconds($seconds);
-
-        $discrepancyNote = 'Verified & Valid';
-        if ($log['status_in'] === 'LATE') {
-            $discrepancyNote = "Late arrival (+{$log['late_minutes']} mins past 10:15 AM grace)";
-        }
-        if ($log['status_day'] === 'HALF_DAY') {
-            $discrepancyNote .= ($discrepancyNote !== 'Verified & Valid' ? ' | ' : '') . 'Half-Day (<8h worked)';
-        }
+    if ($day['has_log']) {
+        $inTime = $day['check_in'] ?: '-';
+        $outTime = $day['check_out'] ?: ($day['is_today'] ? 'In Progress' : '-');
+        $note = $day['discrepancy'] && $day['discrepancy_reason'] ? $day['discrepancy_reason'] : 'Verified & Valid';
 
         fputcsv($output, [
-            $dateStr,
-            $dayName,
+            $day['date'],
+            $day['day_name'],
             $inTime,
             $outTime,
-            $durationFormatted,
-            $log['status_in'],
-            $log['status_day'],
-            $log['late_minutes'],
-            $discrepancyNote
+            $day['worked_formatted'],
+            $day['status_in'] ?: '-',
+            $day['status_day'] ?: '-',
+            $day['late_minutes'],
+            $note
         ]);
-    } elseif ($isPast) {
-        fputcsv($output, [$dateStr, $dayName, 'ABSENT', 'ABSENT', '0h 0m', 'ABSENT', 'ABSENT', 0, 'No attendance recorded on official workday']);
+    } elseif (!$day['is_future']) {
+        fputcsv($output, [$day['date'], $day['day_name'], 'ABSENT', 'ABSENT', '0h 0m', 'ABSENT', 'ABSENT', 0, 'No attendance recorded on official workday']);
     } else {
-        fputcsv($output, [$dateStr, $dayName, '-', '-', '-', 'UPCOMING', 'UPCOMING', 0, 'Future calendar date']);
+        fputcsv($output, [$day['date'], $day['day_name'], '-', '-', '-', 'UPCOMING', 'UPCOMING', 0, 'Future calendar date']);
     }
 }
 
