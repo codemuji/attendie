@@ -45,3 +45,6 @@ The monthly visual breakdown showing actual timestamps, total hours, and status 
 
 ### AttendanceTracker
 The deep domain module encapsulating the Workday lifecycle, punch invariants, shift rule evaluations, and discrepancy calculations behind a minimal 3-method interface (`today`, `punch`, `monthlyReport`).
+
+### AttendanceStore
+The headless frontend telemetry and state store module that coordinates clock tickers, optimistic punch state transitions, and monthly data fetching without direct DOM or presentation coupling.

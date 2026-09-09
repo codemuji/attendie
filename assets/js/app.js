@@ -1,24 +1,27 @@
-const PunchState = Object.freeze({
-  NOT_CHECKED_IN: 'NOT_CHECKED_IN',
-  CHECKED_IN: 'CHECKED_IN',
-  COMPLETED: 'COMPLETED'
-});
+/**
+ * Attendie - View Adapter & UI Interaction Layer
+ * Subscribes to the headless AttendanceStore and renders DOM updates.
+ */
 
-const App = {
-  currentTab: 'today',
-  todayState: null,
-  selectedMonth: '',
-  timerInterval: null,
-  clockInterval: null,
-  elapsedSeconds: 0,
-  
+class AttendieView {
+  constructor(store) {
+    this.store = store;
+    this.currentTab = 'today';
+    this.init();
+  }
+
   init() {
     this.initTabs();
-    this.initClock();
-    this.loadTodayData();
-    this.initMonthSelector();
     this.bindEvents();
-  },
+    
+    // Subscribe view to headless store updates
+    this.store.subscribe((state) => this.render(state));
+
+    // Boot store
+    this.store.init().catch(err => {
+      this.showToast(err.message, 'rose');
+    });
+  }
 
   initTabs() {
     const navItems = document.querySelectorAll('.nav-item');
@@ -28,7 +31,7 @@ const App = {
         this.switchTab(tab);
       });
     });
-  },
+  }
 
   switchTab(tab) {
     this.currentTab = tab;
@@ -38,155 +41,36 @@ const App = {
     document.querySelectorAll('.tab-content').forEach(el => {
       el.classList.toggle('active', el.id === `tab-${tab}`);
     });
-
-    if (tab === 'monthly') {
-      this.loadMonthlyData(this.selectedMonth);
-    }
-  },
-
-  initClock() {
-    const clockEl = document.getElementById('liveClockDisplay');
-    const dateEl = document.getElementById('liveDateDisplay');
-
-    const updateClock = () => {
-      const now = new Date();
-      if (clockEl) {
-        clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      }
-      if (dateEl) {
-        dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
-      }
-    };
-
-    updateClock();
-    this.clockInterval = setInterval(updateClock, 1000);
-  },
-
-  async loadTodayData() {
-    try {
-      const res = await fetch('api/today.php');
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Failed to fetch today data');
-
-      this.todayState = data;
-      this.renderTodayState();
-    } catch (err) {
-      console.error(err);
-      this.showToast(err.message, 'rose');
-    }
-  },
-
-  renderTodayState() {
-    const data = this.todayState;
-    const ringEl = document.getElementById('punchOuterRing');
-    const btnEl = document.getElementById('punchMainBtn');
-    const btnTitle = document.getElementById('punchBtnTitle');
-    const btnHint = document.getElementById('punchBtnHint');
-    const badgeEl = document.getElementById('todayStatusBadge');
-    const elapsedEl = document.getElementById('elapsedTimeCounter');
-    const streakValEl = document.getElementById('statStreakVal');
-
-    if (streakValEl) {
-      streakValEl.textContent = `${data.streak} Days`;
-    }
-
-    // Reset timer
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-      this.timerInterval = null;
-    }
-
-    if (data.state === PunchState.NOT_CHECKED_IN) {
-      ringEl.className = 'punch-outer-ring state-checkin';
-      btnEl.className = 'punch-btn state-checkin';
-      btnTitle.textContent = 'CHECK IN';
-      btnHint.textContent = 'Tap to Clock In';
-      badgeEl.className = 'status-badge-lg badge-muted';
-      badgeEl.innerHTML = '<span class="status-dot"></span> Not Checked In Yet';
-      elapsedEl.textContent = 'Ready for today\'s shift';
-    } else if (data.state === PunchState.CHECKED_IN) {
-      ringEl.className = 'punch-outer-ring state-checkout';
-      btnEl.className = 'punch-btn state-checkout';
-      btnTitle.textContent = 'CHECK OUT';
-      btnHint.textContent = 'Tap to Clock Out';
-      
-      const inTimeStr = new Date(data.today_log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const isLate = data.today_log.status_in === 'LATE';
-      const badgeClass = isLate ? 'badge-amber' : 'badge-emerald';
-      const badgeText = isLate ? `In at ${inTimeStr} • LATE (+${data.today_log.late_minutes}m)` : `In at ${inTimeStr} • ON-TIME`;
-
-      badgeEl.className = `status-badge-lg ${badgeClass}`;
-      badgeEl.innerHTML = `<span class="status-dot"></span> ${badgeText}`;
-
-      // Start elapsed timer
-      this.elapsedSeconds = data.elapsed_seconds;
-      this.renderElapsedTimer(elapsedEl);
-      this.timerInterval = setInterval(() => {
-        this.elapsedSeconds++;
-        this.renderElapsedTimer(elapsedEl);
-      }, 1000);
-    } else if (data.state === PunchState.COMPLETED) {
-      ringEl.className = 'punch-outer-ring state-completed';
-      btnEl.className = 'punch-btn state-completed';
-      btnTitle.textContent = 'DONE';
-      btnHint.textContent = 'Locked for Today';
-
-      const sec = data.today_log.worked_seconds;
-      const h = Math.floor(sec / 3600);
-      const m = Math.floor((sec % 3600) / 60);
-
-      const statusDay = data.today_log.status_day;
-      let dayBadgeClass = 'badge-emerald';
-      if (statusDay === 'HALF_DAY') dayBadgeClass = 'badge-amber';
-      if (statusDay === 'INCOMPLETE') dayBadgeClass = 'badge-rose';
-
-      badgeEl.className = `status-badge-lg ${dayBadgeClass}`;
-      badgeEl.innerHTML = `<span class="status-dot"></span> Completed • ${statusDay.replace('_', ' ')}`;
-      elapsedEl.textContent = `Total Worked: ${h}h ${m}m today`;
-    }
-  },
-
-  renderElapsedTimer(el) {
-    const h = Math.floor(this.elapsedSeconds / 3600);
-    const m = Math.floor((this.elapsedSeconds % 3600) / 60);
-    const s = this.elapsedSeconds % 60;
-    const pad = (n) => String(n).padStart(2, '0');
-    el.textContent = `Active Shift: ${pad(h)}:${pad(m)}:${pad(s)}`;
-  },
+  }
 
   bindEvents() {
+    // Punch button click
     const punchBtn = document.getElementById('punchMainBtn');
-    punchBtn.addEventListener('click', () => {
-      this.handlePunchClick();
-    });
+    punchBtn.addEventListener('click', () => this.handlePunchClick());
 
-    // Confirmation Modal buttons
-    document.getElementById('confirmPunchBtn').addEventListener('click', () => {
-      this.executePunch();
-    });
-
-    document.getElementById('cancelPunchBtn').addEventListener('click', () => {
-      this.closeModal('punchConfirmModal');
-    });
+    // Modal confirmation buttons
+    document.getElementById('confirmPunchBtn').addEventListener('click', () => this.executePunch());
+    document.getElementById('cancelPunchBtn').addEventListener('click', () => this.closeModal('punchConfirmModal'));
 
     // Drawer close buttons
-    document.getElementById('closeProofDrawerBtn').addEventListener('click', () => {
-      this.closeModal('proofDrawerModal');
-    });
+    document.getElementById('closeProofDrawerBtn').addEventListener('click', () => this.closeModal('proofDrawerModal'));
+
+    // Month Navigation
+    document.getElementById('prevMonthBtn').addEventListener('click', () => this.store.adjustMonth(-1));
+    document.getElementById('nextMonthBtn').addEventListener('click', () => this.store.adjustMonth(1));
 
     // Close on backdrop click
     document.querySelectorAll('.modal-backdrop').forEach(modal => {
       modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          modal.classList.remove('active');
-        }
+        if (e.target === modal) modal.classList.remove('active');
       });
     });
-  },
+  }
 
   handlePunchClick() {
-    const state = this.todayState ? this.todayState.state : PunchState.NOT_CHECKED_IN;
-    if (state === PunchState.COMPLETED) {
+    const { punchState, todayLog, elapsedSeconds } = this.store.getState();
+
+    if (punchState === PunchState.COMPLETED) {
       this.showToast('Attendance for today is already completed and locked.', 'muted');
       return;
     }
@@ -200,7 +84,7 @@ const App = {
     const now = new Date();
     const timeFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    if (state === PunchState.NOT_CHECKED_IN) {
+    if (punchState === PunchState.NOT_CHECKED_IN) {
       modalTitle.textContent = 'Confirm Check-In';
       modalSub.textContent = 'Logging your arrival time for today\'s shift.';
       modalTime.textContent = timeFormatted;
@@ -211,104 +95,135 @@ const App = {
       modalTitle.textContent = 'Confirm Check-Out';
       modalSub.textContent = 'Sealing your attendance record for today.';
       modalTime.textContent = timeFormatted;
-      const h = Math.floor(this.elapsedSeconds / 3600);
-      const m = Math.floor((this.elapsedSeconds % 3600) / 60);
+      const h = Math.floor(elapsedSeconds / 3600);
+      const m = Math.floor((elapsedSeconds % 3600) / 60);
       modalPolicy.textContent = `Elapsed duration: ${h}h ${m}m (Target: 8.0h Full Day)`;
       confirmBtn.textContent = 'Confirm Check-Out';
       confirmBtn.style.background = 'var(--color-amber)';
     }
 
     this.openModal('punchConfirmModal');
-  },
+  }
 
   async executePunch() {
     this.closeModal('punchConfirmModal');
     try {
-      const res = await fetch('api/punch.php', {
-        method: 'POST'
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Failed to record punch');
-
+      const data = await this.store.punch();
       this.showToast(data.message, data.action === 'CHECK_IN' ? 'emerald' : 'amber');
-      await this.loadTodayData();
-      if (this.currentTab === 'monthly') {
-        this.loadMonthlyData(this.selectedMonth);
-      }
     } catch (err) {
-      console.error(err);
       this.showToast(err.message, 'rose');
     }
-  },
+  }
 
-  initMonthSelector() {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    this.selectedMonth = `${yyyy}-${mm}`;
+  render(state) {
+    // 1. Render Clock
+    const clockEl = document.getElementById('liveClockDisplay');
+    const dateEl = document.getElementById('liveDateDisplay');
+    if (clockEl) clockEl.textContent = state.clockTime;
+    if (dateEl) dateEl.textContent = state.clockDate;
 
-    document.getElementById('prevMonthBtn').addEventListener('click', () => {
-      this.adjustMonth(-1);
-    });
-    document.getElementById('nextMonthBtn').addEventListener('click', () => {
-      this.adjustMonth(1);
-    });
-  },
+    // 2. Render Today Screen State
+    this.renderTodaySection(state);
 
-  adjustMonth(delta) {
-    const [y, m] = this.selectedMonth.split('-').map(Number);
-    const d = new Date(y, m - 1 + delta, 1);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    this.selectedMonth = `${yyyy}-${mm}`;
-    this.loadMonthlyData(this.selectedMonth);
-  },
-
-  async loadMonthlyData(monthStr) {
-    try {
-      const res = await fetch(`api/history.php?month=${monthStr}`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Failed to fetch history');
-
-      document.getElementById('currentMonthDisplay').textContent = data.month_name;
-      document.getElementById('exportCsvBtn').href = `api/export.php?month=${monthStr}`;
-
-      // Render summary cards
-      document.getElementById('sumPresent').textContent = data.summary.total_present;
-      document.getElementById('sumLate').textContent = data.summary.total_late;
-      document.getElementById('sumHalfDay').textContent = data.summary.total_half_day;
-      document.getElementById('sumAbsent').textContent = data.summary.total_absent;
-
-      // Update home screen metrics
-      const monthlyHoursEl = document.getElementById('statMonthlyHours');
-      if (monthlyHoursEl) {
-        monthlyHoursEl.textContent = data.summary.total_worked_formatted;
-      }
-      const onTimeRateEl = document.getElementById('statOnTimeRate');
-      if (onTimeRateEl) {
-        const total = data.summary.total_present;
-        const onTime = total - data.summary.total_late;
-        const rate = total > 0 ? ((onTime / total) * 100).toFixed(0) : '100';
-        onTimeRateEl.textContent = `${rate}%`;
-      }
-
-      // Discrepancy banner
-      const bannerEl = document.getElementById('discrepancyBanner');
-      const discCountEl = document.getElementById('discrepancyCountText');
-      if (data.summary.discrepancy_count > 0) {
-        bannerEl.style.display = 'flex';
-        discCountEl.textContent = `${data.summary.discrepancy_count} Discrepancy Flag(s) Identified`;
-      } else {
-        bannerEl.style.display = 'none';
-      }
-
-      // Render list
-      this.renderTimeline(data.days);
-    } catch (err) {
-      console.error(err);
-      this.showToast(err.message, 'rose');
+    // 3. Render Monthly Screen State
+    if (state.monthlyData) {
+      this.renderMonthlySection(state);
     }
-  },
+  }
+
+  renderTodaySection(state) {
+    const ringEl = document.getElementById('punchOuterRing');
+    const btnEl = document.getElementById('punchMainBtn');
+    const btnTitle = document.getElementById('punchBtnTitle');
+    const btnHint = document.getElementById('punchBtnHint');
+    const badgeEl = document.getElementById('todayStatusBadge');
+    const elapsedEl = document.getElementById('elapsedTimeCounter');
+    const streakValEl = document.getElementById('statStreakVal');
+
+    if (streakValEl) streakValEl.textContent = `${state.streak} Days`;
+
+    if (state.punchState === PunchState.NOT_CHECKED_IN) {
+      ringEl.className = 'punch-outer-ring state-checkin';
+      btnEl.className = 'punch-btn state-checkin';
+      btnTitle.textContent = 'CHECK IN';
+      btnHint.textContent = 'Tap to Clock In';
+      badgeEl.className = 'status-badge-lg badge-muted';
+      badgeEl.innerHTML = '<span class="status-dot"></span> Not Checked In Yet';
+      elapsedEl.textContent = 'Ready for today\'s shift';
+    } else if (state.punchState === PunchState.CHECKED_IN) {
+      ringEl.className = 'punch-outer-ring state-checkout';
+      btnEl.className = 'punch-btn state-checkout';
+      btnTitle.textContent = 'CHECK OUT';
+      btnHint.textContent = 'Tap to Clock Out';
+
+      if (state.todayLog) {
+        const inTimeStr = new Date(state.todayLog.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const isLate = state.todayLog.status_in === 'LATE';
+        const badgeClass = isLate ? 'badge-amber' : 'badge-emerald';
+        const badgeText = isLate ? `In at ${inTimeStr} • LATE (+${state.todayLog.late_minutes}m)` : `In at ${inTimeStr} • ON-TIME`;
+        badgeEl.className = `status-badge-lg ${badgeClass}`;
+        badgeEl.innerHTML = `<span class="status-dot"></span> ${badgeText}`;
+      }
+
+      elapsedEl.textContent = `Active Shift: ${state.elapsedFormatted}`;
+    } else if (state.punchState === PunchState.COMPLETED) {
+      ringEl.className = 'punch-outer-ring state-completed';
+      btnEl.className = 'punch-btn state-completed';
+      btnTitle.textContent = 'DONE';
+      btnHint.textContent = 'Locked for Today';
+
+      if (state.todayLog) {
+        const sec = state.todayLog.worked_seconds;
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const statusDay = state.todayLog.status_day;
+        let dayBadgeClass = 'badge-emerald';
+        if (statusDay === 'HALF_DAY') dayBadgeClass = 'badge-amber';
+        if (statusDay === 'INCOMPLETE') dayBadgeClass = 'badge-rose';
+
+        badgeEl.className = `status-badge-lg ${dayBadgeClass}`;
+        badgeEl.innerHTML = `<span class="status-dot"></span> Completed • ${statusDay.replace('_', ' ')}`;
+        elapsedEl.textContent = `Total Worked: ${h}h ${m}m today`;
+      }
+    }
+  }
+
+  renderMonthlySection(state) {
+    const data = state.monthlyData;
+    document.getElementById('currentMonthDisplay').textContent = data.month_name;
+    document.getElementById('exportCsvBtn').href = `api/export.php?month=${state.selectedMonth}`;
+
+    // Summary Cards
+    document.getElementById('sumPresent').textContent = data.summary.total_present;
+    document.getElementById('sumLate').textContent = data.summary.total_late;
+    document.getElementById('sumHalfDay').textContent = data.summary.total_half_day;
+    document.getElementById('sumAbsent').textContent = data.summary.total_absent;
+
+    // Home screen metrics
+    const monthlyHoursEl = document.getElementById('statMonthlyHours');
+    if (monthlyHoursEl) monthlyHoursEl.textContent = data.summary.total_worked_formatted;
+
+    const onTimeRateEl = document.getElementById('statOnTimeRate');
+    if (onTimeRateEl) {
+      const total = data.summary.total_present;
+      const onTime = total - data.summary.total_late;
+      const rate = total > 0 ? ((onTime / total) * 100).toFixed(0) : '100';
+      onTimeRateEl.textContent = `${rate}%`;
+    }
+
+    // Discrepancy Banner
+    const bannerEl = document.getElementById('discrepancyBanner');
+    const discCountEl = document.getElementById('discrepancyCountText');
+    if (data.summary.discrepancy_count > 0) {
+      bannerEl.style.display = 'flex';
+      discCountEl.textContent = `${data.summary.discrepancy_count} Discrepancy Flag(s) Identified`;
+    } else {
+      bannerEl.style.display = 'none';
+    }
+
+    // Render daily list
+    this.renderTimeline(data.days);
+  }
 
   renderTimeline(days) {
     const listEl = document.getElementById('attendanceList');
@@ -353,13 +268,10 @@ const App = {
         </div>
       `;
 
-      row.addEventListener('click', () => {
-        this.openProofDrawer(day);
-      });
-
+      row.addEventListener('click', () => this.openProofDrawer(day));
       listEl.appendChild(row);
     });
-  },
+  }
 
   openProofDrawer(day) {
     document.getElementById('proofDrawerDate').textContent = `${day.day_name}, ${day.date}`;
@@ -379,17 +291,17 @@ const App = {
     }
 
     this.openModal('proofDrawerModal');
-  },
+  }
 
   openModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) modal.classList.add('active');
-  },
+  }
 
   closeModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) modal.classList.remove('active');
-  },
+  }
 
   showToast(message, type = 'emerald') {
     const container = document.getElementById('toastContainer');
@@ -415,8 +327,9 @@ const App = {
       setTimeout(() => toast.remove(), 300);
     }, 3200);
   }
-};
+}
 
 document.addEventListener('DOMContentLoaded', () => {
-  App.init();
+  const store = new AttendanceStore();
+  new AttendieView(store);
 });

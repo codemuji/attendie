@@ -250,6 +250,7 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container"></div>
 
+  <script src="assets/js/store.js"></script>
   <script src="assets/js/app.js"></script>
 </body>
 </html>
