@@ -1,0 +1,4 @@
+# Dependencies and tool configurations
+skills-lock.json
+.scratch/
+*.log
